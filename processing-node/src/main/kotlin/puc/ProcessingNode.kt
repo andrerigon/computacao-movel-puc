@@ -23,11 +23,14 @@ object ProcessingNode : ModelApplication(), UpdateListener {
 
     init {
         val cepConfig = Configuration()
+        // adiciona o tipo de evento que será enviado pro cep processar
         cepConfig.addEventType("WaterMeasurement", WaterMeasurement::class.java.name)
+        // configura a engine e guarda referencia pro runtime
         val cep = EPServiceProviderManager.getProvider("myCEPEngine", cepConfig)
         cepRT = cep.epRuntime
 
         val cepAdm = cep.epAdministrator
+        // configura uma query de cep
         val cepStatement = """
             select 
                 id, avg(ph) ph, avg(o2) o2, count(*) total, max(updatedAt) updated_at
@@ -36,20 +39,26 @@ object ProcessingNode : ModelApplication(), UpdateListener {
             where 
                 clean = true group by id having count(*) > 1
         """
+        // cria um inspetor e adiciona a propria query como listener
         val cepInspector = cepAdm.createEPL(cepStatement)
         cepInspector.addListener(this)
     }
 
+    /**
+     * Recebe eventos do mobile hub
+     */
     override fun recordReceived(record: ConsumerRecord<*, *>) {
         try {
+            // deserializa o record (bytearray) para um mapa
             val data = swap.SwapDataDeserialization(record.value() as ByteArray)
             val typeRef = object : TypeReference<Map<String, String>>() {}
 
             val map: Map<String, String> = objectMapper.readValue(data.message, typeRef)
+            // ignora se não for um tópico de dados
             if (map["topic"] != "data") return
 
+            // extrai os dados do sensor e cria um um objeto de input pro cep
             val typeRef2 = object : TypeReference<Map<String, Any>>() {}
-
             val payload = objectMapper.readValue(map["payload"]!!.replace("\\", "").drop(1).dropLast(1), typeRef2)
 
             val (id, ph, o2, clean) = (payload["sensor_data"] as List<*>).map { it.toString().toDouble() }
@@ -57,6 +66,7 @@ object ProcessingNode : ModelApplication(), UpdateListener {
                 id.toInt(), ph, o2, clean == 1.0, Date()
             )
             println(measurement)
+            // envia o arquivo pro cep analisar
             cepRT.sendEvent(measurement)
 
         } catch (e: Exception) {
@@ -65,6 +75,7 @@ object ProcessingNode : ModelApplication(), UpdateListener {
     }
 
 
+    // recebe os eventos do cep que passaram na query de test
     override fun update(newEvents: Array<out EventBean>, oldEvents: Array<out EventBean>?) {
         val props = (newEvents.first() as MapEventBean).properties
         println("Just got an CEP event: $props}")

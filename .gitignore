@@ -1,4 +1,4 @@
-./processing-node/build
-./mobile-node/build
 .gradle
 .idea
+mobile-node/build/
+processing-node/build/
